@@ -1,0 +1,9 @@
+#!/bin/sh
+
+# this file is executed from crontab
+
+BACKUP=/usr/local/bin/db-backup.local
+
+$BACKUP mysql
+
+exit 0

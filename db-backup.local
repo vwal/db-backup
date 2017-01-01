@@ -1,0 +1,127 @@
+#!/bin/sh
+
+ARGV="$@"
+
+#### EDIT ###########################################################
+
+# password to use with mysqldump
+DBROOTPWD="xxxxxxxxxxxxxxx"
+
+# backups root path
+BAKROOTPATH=/bak
+
+# Local holding place for database dumps; this directory stores
+# compressed backups with date-stamped and versioned filenames
+# in identical directory structure as the remote so that the
+# secondary script can direct copy backups from here.
+BASEPATH=${BAKROOTPATH}/local
+
+# Dumps in S3PATH are uncompressed so that they can be diffed; 
+# they should be local unless S3 transit is done on a different system.
+# This directory stores latest uncompressed backups with no date or
+# versioning in the file name.
+S3PATH=${BAKROOTPATH}/local-s3
+
+# Backups in S3STANDBYPATH are always the latest compressed 
+# full database dumps. These can be copied as-is to a bucket with 
+# a lifecycle policy.
+S3STANDBYPATH=${BAKROOTPATH}/s3-standby
+
+# OFFSITEPATH is intended for extenal pull (e.g. via (S)FTP(ES) or Samba)
+# This directory stores latest compressed backups with no date or
+# versioning in the file name.
+OFFSITEPATH=${BAKROOTPATH}/offsite-standby
+
+#####################################################################
+
+if [ $# -ne 1 ]; then
+   echo 1>&2 Usage: $0 databasename
+   exit 127
+fi
+
+SHELL=/bin/sh
+PATH=/etc:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
+LOG=/var/log/db-backup.log
+
+echo ----- >>${LOG}
+echo `date` `tty` $* >>${LOG}
+
+NUMDATE=`date "+%Y%m%d"`
+ND=`date "+%d"`
+POSTFIX=1
+BASENM=${ARGV}
+
+TARGETBASEPATH=${BASEPATH}/db.${BASENM}
+FILENM=${NUMDATE}\_${BASENM}\_${POSTFIX}.sql
+
+FQFN=${TARGETBASEPATH}/${FILENM}
+S3FQFN=${S3PATH}/${BASENM}.sql
+
+BASECREATED=false
+if [ ! -d ${TARGETBASEPATH} ] ; then
+   mkdir -p ${TARGETBASEPATH}
+   BASECREATED=true
+fi
+
+[ ! -d ${S3PATH} ] && mkdir -p ${S3PATH}
+[ ! -d ${OFFSITEPATH} ] && mkdir -p ${OFFSITEPATH}
+[ ! -d ${S3STANDBYPATH} ] && mkdir -p ${S3STANDBYPATH}
+
+zFQFN=${FQFN}.gz
+if [ -e ${zFQFN} ] ; then
+   while [ -e ${zFQFN} ] ; do
+      POSTFIX=`expr ${POSTFIX} + 1`
+      FILENM=${NUMDATE}\_${BASENM}\_${POSTFIX}.sql
+      FQFN=${TARGETBASEPATH}/${FILENM}
+      zFQFN=${FQFN}.gz
+   done
+fi
+
+mysqldump -uroot -p${DBROOTPWD} --opt -B ${BASENM} -r ${FQFN}
+SQLDUMPRESULT=$?
+
+if [ "${SQLDUMPRESULT}" != "0" ] ; then
+   echo "*** DATABASE '${BASENM}' DUMP FAILED ***" >> ${LOG}
+   echo ---- >>${LOG}
+   if [ "${BASECREATED}" = "true" ] ; then
+      rm -rf ${TARGETBASEPATH}
+   fi
+   exit 127
+else
+   cp -pf ${FQFN} ${S3FQFN}
+   gzip ${FQFN}
+   chmod 640 ${zFQFN}
+   echo Database \"${BASENM}\" backed up with name \"${FILENM}.gz\". 2>&1 >> ${LOG}
+
+   # make a copy wihtout date in the name (for scripted transfers out)
+   cp -pf ${zFQFN} ${OFFSITEPATH}/db-${BASENM}\_sql.gz
+   chown nobody.nogroup ${OFFSITEPATH}/db-${BASENM}\_sql.gz
+
+   # prevent multiple dumps of a same database per day at s3-standby
+   rm -rf ${S3STANDBYPATH}/*${BASENM}*
+
+   # make a copy of the dump with the full name for the daily wildcard transfer to S3
+   cp -pf ${zFQFN} ${S3STANDBYPATH}/
+
+   MONTHLYPATH=${TARGETBASEPATH}/monthly
+   if [ ${ND} -eq 01 ] ; then
+      [ ! -d ${TARGETBASEPATH}/monthly ] && mkdir -p ${TARGETBASEPATH}/monthly
+      cp -pf ${zFQFN} ${MONTHLYPATH}/${FILENM}.gz
+      echo Bi-monthly long-term backup of db.${BASENM} created. 2>&1 >> ${LOG}
+   fi
+
+   if [ ${ND} -eq 15 ] ; then
+      [ ! -d ${TARGETBASEPATH}/monthly ] && mkdir -p ${TARGETBASEPATH}/monthly   
+      cp -pf ${zFQFN} ${MONTHLYPATH}/${FILENM}.gz
+      echo Bi-monthly long-term backup of db.${BASENM} created. 2>&1 >> ${LOG}
+   fi
+
+   find ${TARGETBASEPATH} -maxdepth 1 -mtime +7 -type f -exec rm {} \;
+   echo Local backups of db.${BASENM} older than seven days erased. 2>&1 >> ${LOG}
+
+   find ${TARGETBASEPATH}/monthly -maxdepth 1 -mtime +110 -type f -exec rm {} \;
+   echo Local long-term backups of db.${BASENM} older than 110 days erased. 2>&1 >> ${LOG}
+
+fi
+
+exit 0

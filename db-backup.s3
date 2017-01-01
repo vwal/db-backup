@@ -1,0 +1,41 @@
+#!/bin/sh
+
+#### EDIT ###########################################################
+
+BAKROOTPATH=/bak
+
+# Backups in S3STANDBYPATH are always the latest compressed 
+# full database dumps. These can be copied as-is to a bucket with 
+# a lifecycle policy.
+S3STANDBYPATH=${BAKROOTPATH}/s3-standby
+
+# Target bucket/dir path in S3
+S3TARGETPATH=s3://my-s3-bucket/database-backups-EXPPOL
+
+#####################################################################
+
+SHELL=/bin/sh
+PATH=/etc:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin
+LOG=/var/log/db-backup.log
+
+exec 3>&1 1>>${LOG} 2>&1
+
+echo ----- 
+echo `date` `tty` $*
+
+type s3cmd > /dev/null 2>&1 || { echo "I require s3cmd but it's not installed. Aborting." | tee /dev/fd/3; exit 1; }
+
+if [ ! "$(ls -A $S3STANDBYPATH)" ] ; then
+    echo "S3 Standby Directory is empty; nothing to copy. Aborting." | tee /dev/fd/3
+    exit 1
+fi
+
+/usr/bin/s3cmd -e put ${S3STANDBYPATH}/* ${S3TARGETPATH}/
+
+echo Compressed backup dumps copied to S3 at ${S3TARGETPATH}
+
+rm -rf ${S3STANDBYPATH}/*
+
+echo S3 standby directory \(${S3STANDBYPATH}\) purged.
+
+exit 0

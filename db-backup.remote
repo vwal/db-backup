@@ -1,0 +1,39 @@
+#!/bin/sh
+
+#
+# This is used to back up to a samba or NFS mount, 
+# or to s3ql filesystem on S3
+#
+
+#### EDIT ###########################################################
+BAKROOTPATH=/bak
+SOURCEPATH=${BAKROOTPATH}/local
+REMOTEPATH=${BAKROOTPATH}/backups
+S3SOURCEPATH=${BAKROOTPATH}/local-s3
+S3REMOTEPATH=${REMOTEPATH}/backups-s3
+#####################################################################
+
+SHELL=/bin/sh
+PATH=/etc:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin
+LOG=/var/log/daily.log
+
+echo `date` `tty` $* >>${LOG}
+
+if [ -d ${SOURCEPATH} ] ; then
+   cp -Rpnf ${SOURCEPATH}/* ${REMOTEPATH}
+fi
+
+# NOTE! This is similar to local->backups except that
+#       'backups-s3' would reside in S3.
+#cp -pf ${S3SOURCEPATH}/* ${S3REMOTEPATH}
+
+find ${REMOTEPATH} -maxdepth 2 -mtime +14 -type f -exec rm {} \;
+echo Daily backups older than two weeks erased. 2>&1 >> ${LOG}
+
+# hide find errors in case monthly folder doesn't exist
+exec 2> /dev/null
+find ${REMOTEPATH}/*/monthly -maxdepth 1 -mtime +180 -type f -exec rm {} \;
+echo Monthly backups older than six months erased. 2>&1 >> ${LOG}
+echo ---- >>${LOG}
+
+exit 0
