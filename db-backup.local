@@ -104,16 +104,18 @@ else
    cp -pf ${zFQFN} ${S3STANDBYPATH}/
 
    MONTHLYPATH=${TARGETBASEPATH}/monthly
-   if [ ${ND} -eq 01 ] ; then
-      [ ! -d ${TARGETBASEPATH}/monthly ] && mkdir -p ${TARGETBASEPATH}/monthly
-      cp -pf ${zFQFN} ${MONTHLYPATH}/${FILENM}.gz
-      echo Bi-monthly long-term backup of db.${BASENM} created. 2>&1 >> ${LOG}
-   fi
+   if [ ${POSTFIX} -eq 1 ] ; then
+     if [ ${ND} -eq 01 ] ; then
+        [ ! -d ${TARGETBASEPATH}/monthly ] && mkdir -p ${TARGETBASEPATH}/monthly
+        cp -pf ${zFQFN} ${MONTHLYPATH}/${FILENM}.gz
+        echo Bi-monthly long-term backup of db.${BASENM} created. 2>&1 >> ${LOG}
+     fi
 
-   if [ ${ND} -eq 15 ] ; then
-      [ ! -d ${TARGETBASEPATH}/monthly ] && mkdir -p ${TARGETBASEPATH}/monthly   
-      cp -pf ${zFQFN} ${MONTHLYPATH}/${FILENM}.gz
-      echo Bi-monthly long-term backup of db.${BASENM} created. 2>&1 >> ${LOG}
+     if [ ${ND} -eq 15 ] ; then
+        [ ! -d ${TARGETBASEPATH}/monthly ] && mkdir -p ${TARGETBASEPATH}/monthly   
+        cp -pf ${zFQFN} ${MONTHLYPATH}/${FILENM}.gz
+        echo Bi-monthly long-term backup of db.${BASENM} created. 2>&1 >> ${LOG}
+     fi
    fi
 
    find ${TARGETBASEPATH} -maxdepth 1 -mtime +7 -type f -exec rm {} \;

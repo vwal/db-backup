@@ -1,6 +1,13 @@
 #!/bin/sh
 
-# this file is executed from crontab after the db-backup.batch has been run
+# This file is executed from crontab after the db-backup.batch has been run
+# NOTE: Only the short-term backup purges the source dir;
+#       run the long-term backup in cron before the short-term one!
+#
+# NOTE: 'longterm' arg triggers the long-term backup
+
+
+ARGV="$@"
 
 #### EDIT ###########################################################
 
@@ -11,8 +18,14 @@ BAKROOTPATH=/bak
 # a lifecycle policy.
 S3STANDBYPATH=${BAKROOTPATH}/s3-standby
 
-# Target bucket/dir path in S3
-S3TARGETPATH=s3://my-s3-bucket/database-backups-EXPPOL
+# Target dir in S3
+BUCKETDIR=my-target-dir-name-here
+
+if [ "${ARGV}" = "longterm" ] ; then
+    S3TARGETPATH=s3://my-db-backups-exppol/${BUCKETDIR}
+else
+    S3TARGETPATH=s3://my-db-backups-shortterm-exppol/${BUCKETDIR}
+fi
 
 #####################################################################
 
@@ -27,17 +40,22 @@ echo `date` `tty` $*
 
 type s3cmd > /dev/null 2>&1 || { echo "I require s3cmd but it's not installed. Aborting." | tee /dev/fd/3; exit 1; }
 
+if [ ! -d ${S3STANDBYPATH} ] ; then
+    echo "S3 Standby Directory does not exist. Aborting." | tee /dev/fd/3
+    exit 1
+fi
+
 if [ ! "$(ls -A $S3STANDBYPATH)" ] ; then
     echo "S3 Standby Directory is empty; nothing to copy. Aborting." | tee /dev/fd/3
     exit 1
 fi
 
-/usr/bin/s3cmd -e put ${S3STANDBYPATH}/* ${S3TARGETPATH}/
-
+s3cmd -e put ${S3STANDBYPATH}/* ${S3TARGETPATH}/
 echo Compressed backup dumps copied to S3 at ${S3TARGETPATH}
 
-rm -rf ${S3STANDBYPATH}/*
-
-echo S3 standby directory \(${S3STANDBYPATH}\) purged.
+if [ ! "${ARGV}" = "longterm" ] ; then
+    rm -rf ${S3STANDBYPATH}/*
+    echo S3 standby directory \(${S3STANDBYPATH}\) purged.
+fi
 
 exit 0
